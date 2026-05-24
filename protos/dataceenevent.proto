@@ -1,0 +1,86 @@
+﻿syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "DataceenEventStore";
+option go_package = "github.com/dataceen/client-go/pkg/dataceenevent;dataceenevent";
+
+package dataceen;
+
+// The dataceenevent service definition.
+service DataceenEvent {
+  rpc Subscribe (SubscriptionRequest) returns (stream EventData);
+}
+
+enum StartMode {
+  POSITION_BEGINNING = 0;
+  POSITION_END = 1;
+  POSITION_EXACT = 2;
+  POSITION_TIME = 3;
+  BASELOAD = 4;
+}
+
+message SubscriptionRequest {
+  string domain = 1;
+  string model = 2;
+  string scope = 3;
+  repeated string baseloadtopics = 4;
+  repeated string topics = 5;
+  repeated string ids = 6;
+  StartMode startmode = 7;
+  string position = 8;
+  google.protobuf.Timestamp starttime = 9;
+  bool includedelta = 10;
+  bool includecomplete = 11;
+  string baseloadcontinueobjecttype = 12;
+  string positionbeforebaseload = 13;
+}
+
+enum MessageType {
+  NORMAL = 0;
+  KEEPALIVE=1;
+}
+
+
+
+enum EventType {
+  SUBSCRIPTION_EVENT = 0;
+  BASELOAD_EVENT = 1;
+  BASELOAD_STEP_1 = 2;
+  BASELOAD_STEP_1_ALL = 3;
+  BASELOAD_END = 4;
+  POSITION_AT_START_PASSED = 5;
+  CONNECTION_LOST = 6;
+  CONNECTION_RECONNECTED = 7;
+}
+
+enum OperationType {
+  CREATE = 0;
+  UPDATE = 1;
+  DELETE = 2;
+}
+
+enum ObjectType {
+  NODE = 0;
+  RELATIONSHIP = 1;
+}
+
+
+message EventData {
+  MessageType messagetype = 1;
+  EventType eventtype = 2;
+  string position = 3;
+  google.protobuf.Timestamp eventtime = 4;
+  ObjectType objecttype = 5;
+  OperationType operationtype = 6;
+  string clientid = 7;
+  string domain = 8;
+  string model = 9;
+  string topic = 10;
+  string id = 11;
+  string fromid = 12;
+  string toid = 13;
+  string delta = 14;
+  string complete = 15;
+  string positionbeforebaseload = 16;
+}

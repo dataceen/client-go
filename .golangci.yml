@@ -1,0 +1,50 @@
+# golangci-lint config — minimal, focused on real signals over style nits.
+# Run: golangci-lint run
+
+run:
+  timeout: 5m
+  # Generated client code lives in pkg/generated/ and proto bindings in
+  # pkg/dataceenevent/. Lint them lightly — we don't hand-edit them.
+
+linters:
+  # Default linters are enabled by default. Adding the high-signal ones
+  # we explicitly want; turning off the noisy ones.
+  disable-all: false
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - gofmt
+    - goimports
+  disable:
+    # gosec produces false positives on string concatenation in query
+    # builders (we control all inputs). Turn back on if we accept user
+    # input directly into queries.
+    - gosec
+
+issues:
+  exclude-dirs:
+    - pkg/dataceenevent  # protoc-generated
+  exclude-rules:
+    # Generated client code uses string-concat for query assembly. False
+    # positive for `errcheck` on intentional discards in tests.
+    - path: 'pkg/generated/'
+      linters:
+        - revive
+        - gofmt
+    - path: '_test\.go'
+      linters:
+        - errcheck
+
+linters-settings:
+  revive:
+    rules:
+      - name: var-naming
+        # `MetaId` is preferred over `MetaID` in our generated structs to
+        # match the JSON tag's case (and stay consistent with the wire
+        # format). Disable the ID-uppercase rule.
+        disabled: true

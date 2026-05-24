@@ -1,0 +1,30 @@
+.env
+*.env.local
+
+# Build output
+/bin/
+/dist/
+*.exe
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+
+# Generated codegen cache (Phase 3+)
+/tools/codegen/cache/
+
+# Generated client code (Phase 3+, regenerate via `go run ./tools/codegen`)
+/pkg/generated/
+
+# Note: pkg/dataceenevent/*.pb.go IS committed (small, stable, lets consumers
+# build without protoc). Regenerate via `make gen` when protos/ changes.
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
