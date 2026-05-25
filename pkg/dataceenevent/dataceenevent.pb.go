@@ -29,6 +29,7 @@ const (
 	StartMode_POSITION_END       StartMode = 1
 	StartMode_POSITION_EXACT     StartMode = 2
 	StartMode_POSITION_TIME      StartMode = 3
+	StartMode_BASELOAD           StartMode = 4
 )
 
 // Enum value maps for StartMode.
@@ -38,12 +39,14 @@ var (
 		1: "POSITION_END",
 		2: "POSITION_EXACT",
 		3: "POSITION_TIME",
+		4: "BASELOAD",
 	}
 	StartMode_value = map[string]int32{
 		"POSITION_BEGINNING": 0,
 		"POSITION_END":       1,
 		"POSITION_EXACT":     2,
 		"POSITION_TIME":      3,
+		"BASELOAD":           4,
 	}
 )
 
@@ -622,12 +625,13 @@ const file_dataceenevent_proto_rawDesc = "" +
 	"\x04toid\x18\r \x01(\tR\x04toid\x12\x14\n" +
 	"\x05delta\x18\x0e \x01(\tR\x05delta\x12\x1a\n" +
 	"\bcomplete\x18\x0f \x01(\tR\bcomplete\x126\n" +
-	"\x16positionbeforebaseload\x18\x10 \x01(\tR\x16positionbeforebaseload*\\\n" +
+	"\x16positionbeforebaseload\x18\x10 \x01(\tR\x16positionbeforebaseload*j\n" +
 	"\tStartMode\x12\x16\n" +
 	"\x12POSITION_BEGINNING\x10\x00\x12\x10\n" +
 	"\fPOSITION_END\x10\x01\x12\x12\n" +
 	"\x0ePOSITION_EXACT\x10\x02\x12\x11\n" +
-	"\rPOSITION_TIME\x10\x03*(\n" +
+	"\rPOSITION_TIME\x10\x03\x12\f\n" +
+	"\bBASELOAD\x10\x04*(\n" +
 	"\vMessageType\x12\n" +
 	"\n" +
 	"\x06NORMAL\x10\x00\x12\r\n" +

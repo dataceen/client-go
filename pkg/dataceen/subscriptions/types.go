@@ -22,6 +22,9 @@ const (
 	StartPositionEnd       StartMode = "POSITION_END"
 	StartPositionExact     StartMode = "POSITION_EXACT"
 	StartPositionTime      StartMode = "POSITION_TIME"
+	// StartBaseload baseloads every type in BaseloadTopics first, then live
+	// events. Baseload is NOT implicit — you must select this mode explicitly.
+	StartBaseload StartMode = "BASELOAD"
 )
 
 // MessageType matches the proto enum. KEEPALIVE messages are filtered before
