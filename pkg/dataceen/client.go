@@ -155,6 +155,18 @@ func parseGraphQLResponse(body []byte, req GraphQL, out any) error {
 	}
 
 	payload, ok := envelope.Data[req.OperationName]
+	// A refusal of the whole call comes as data.ResponseCode / data.Message (e.g. a saved search the server will not keep).
+	if top, has := envelope.Data["ResponseCode"]; (!ok || string(payload) == "null") && has {
+		var code int
+		if json.Unmarshal(top, &code) == nil && code != 0 {
+			var message string
+			_ = json.Unmarshal(envelope.Data["Message"], &message)
+			if message == "" {
+				message = fmt.Sprintf("ResponseCode=%d", code)
+			}
+			return newError(message, code, req.Query, nil)
+		}
+	}
 	if !ok || len(payload) == 0 || string(payload) == "null" {
 		preview := string(body)
 		if len(preview) > 500 {

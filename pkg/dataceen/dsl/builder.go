@@ -18,10 +18,14 @@ func (f FieldExpr) Gte(v any) FilterExpr { return condExpr{f.name, "gte", v} }
 func (f FieldExpr) Lt(v any) FilterExpr  { return condExpr{f.name, "lt", v} }
 func (f FieldExpr) Lte(v any) FilterExpr { return condExpr{f.name, "lte", v} }
 
-// Like is Elasticsearch token-match (decisions.md #39): never wildcards
-// (`%`/`*`), never delimiters (`-`/space/`.`).
+// Like is a pattern on the whole value, case-insensitive: `%` matches any run
+// of characters and `_` one character (`\%`, `\_`, `\\` are the characters
+// themselves). "cst-%" matches every id starting with cst-; "%berg%" contains
+// berg. Regex takes a raw regular expression.
 func (f FieldExpr) Like(v string) FilterExpr     { return condExpr{f.name, "like", v} }
 func (f FieldExpr) NLike(v string) FilterExpr    { return condExpr{f.name, "nlike", v} }
+func (f FieldExpr) Regex(v string) FilterExpr    { return condExpr{f.name, "regex", v} }
+func (f FieldExpr) NRegex(v string) FilterExpr   { return condExpr{f.name, "nregex", v} }
 func (f FieldExpr) Contains(v string) FilterExpr { return condExpr{f.name, "contains", v} }
 func (f FieldExpr) NContains(v string) FilterExpr {
 	return condExpr{f.name, "ncontains", v}
