@@ -41,6 +41,9 @@ type RunOptions struct {
 	MaxReconnects        int           // default 10
 	ReconnectBase        time.Duration // default 1s
 	ReconnectMax         time.Duration // default 60s
+	// ReconnectMaxRefused is the longest wait between attempts while the
+	// subscription service refuses the subscription (default 5m).
+	ReconnectMaxRefused time.Duration
 	// dialer overrides the default gRPC dial path. Used by tests.
 	dialer func(subscriptionURL, token string) (closeFn func() error, _ streamClient, _ error)
 }
@@ -51,19 +54,27 @@ type RunOptions struct {
 //   - opens a gRPC stream
 //   - reads EventData, skips KEEPALIVEs, dispatches to handlers
 //   - on stream error: emits synthetic CONNECTION_LOST to handlers, sleeps
-//     with exponential backoff, retries up to MaxReconnects
+//     with exponential backoff, retries up to MaxReconnects. The wait starts
+//     at ReconnectBase and doubles for each failure in a row, up to
+//     ReconnectMax, or ReconnectMaxRefused while the service refuses the
+//     subscription (UNAUTHENTICATED or PERMISSION_DENIED); it starts over
+//     when a stream delivered a message (the keepalive counts) or stayed
+//     open a minute.
 //   - first event after a successful reconnect emits CONNECTION_RECONNECTED
 //   - returns nil when ctx is canceled or the server closes the stream cleanly
 func Run(ctx context.Context, sub *Subscription, opts RunOptions) error {
 	o := withDefaults(opts)
-	delay := o.ReconnectBase
+	backoff := reconnectBackoff{base: o.ReconnectBase, max: o.ReconnectMax, maxRefused: o.ReconnectMaxRefused}
+	refusalSaid := false
+	forceToken := false
 
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		token, err := o.Tokens.AcquireToken(ctx, []string{o.SubscriptionScope}, false)
+		token, err := o.Tokens.AcquireToken(ctx, []string{o.SubscriptionScope}, forceToken)
+		forceToken = false
 		if err != nil {
 			return fmt.Errorf("subscriptions: acquire token: %w", err)
 		}
@@ -73,7 +84,9 @@ func Run(ctx context.Context, sub *Subscription, opts RunOptions) error {
 			return fmt.Errorf("subscriptions: dial: %w", err)
 		}
 
-		streamErr := readUntilDone(ctx, sub, client, o)
+		opened := time.Now()
+		received, streamErr := readUntilDone(ctx, sub, client, o)
+		healthy := received || time.Since(opened) >= reconnectResetAfter
 		if closer != nil {
 			_ = closer()
 		}
@@ -99,16 +112,32 @@ func Run(ctx context.Context, sub *Subscription, opts RunOptions) error {
 		// Notify handlers.
 		dispatchToAll(sub, syntheticEvent(EventConnectionLost, sub), o)
 
-		o.Logger.Log("warn", fmt.Sprintf(
-			"subscription %s: stream error (attempt %d/%d): %v. Reconnecting in %s.",
-			sub.ID, attempt, o.MaxReconnects, streamErr, delay), nil)
+		refused := isRefused(streamErr)
+		if healthy {
+			refusalSaid = false
+		}
+		delay := backoff.next(healthy, refused)
+		switch {
+		case refused && !refusalSaid:
+			// Said once at error level; the retries that meet the same
+			// refusal are debug lines.
+			refusalSaid = true
+			// The token is kept between connects. A token the service does
+			// not accept is asked for anew once, not on every retry.
+			forceToken = status.Code(streamErr) == codes.Unauthenticated
+			o.Logger.Log("error", refusalMessage(sub, streamErr, o.ReconnectMaxRefused), nil)
+		case refused:
+			o.Logger.Log("debug", fmt.Sprintf(
+				"subscription %s: still refused (attempt %d/%d). Trying again in %s.",
+				sub.ID, attempt, o.MaxReconnects, delay), nil)
+		default:
+			o.Logger.Log("warn", fmt.Sprintf(
+				"subscription %s: stream error (attempt %d/%d): %v. Reconnecting in %s.",
+				sub.ID, attempt, o.MaxReconnects, streamErr, delay), nil)
+		}
 
 		if err := sleepCtx(ctx, delay); err != nil {
 			return nil
-		}
-		delay *= 2
-		if delay > o.ReconnectMax {
-			delay = o.ReconnectMax
 		}
 
 		// Mutate the request so the next iteration resumes instead of
@@ -116,6 +145,69 @@ func Run(ctx context.Context, sub *Subscription, opts RunOptions) error {
 		// after a transient drop). Mirrors DataceenClient.cs:ConnectionLostAsync.
 		prepareRequestForReconnect(sub)
 	}
+}
+
+// reconnectResetAfter: a stream that stayed open this long was a working
+// connection, and the failure that ended it starts the waits over.
+const reconnectResetAfter = 60 * time.Second
+
+// reconnectDelay is the wait before connect number failures in a row
+// (1 = after the first failure): base, doubled for each failure after the
+// first, never above max.
+func reconnectDelay(base, max time.Duration, failures int) time.Duration {
+	d := base
+	for i := 1; i < failures && d < max; i++ {
+		d *= 2
+	}
+	if d > max {
+		d = max
+	}
+	return d
+}
+
+// reconnectBackoff counts the failed streams in a row.
+type reconnectBackoff struct {
+	base, max, maxRefused time.Duration
+	failures              int
+}
+
+// next takes one failed stream and answers the wait before the next connect.
+// healthy: the stream delivered a message or stayed open reconnectResetAfter,
+// so this failure is the first of a new run. refused: the service refused the
+// subscription, which no retry cures by itself, so the waits may grow to
+// maxRefused.
+func (b *reconnectBackoff) next(healthy, refused bool) time.Duration {
+	if healthy {
+		b.failures = 0
+	}
+	b.failures++
+	if refused {
+		return reconnectDelay(b.base, b.maxRefused, b.failures)
+	}
+	return reconnectDelay(b.base, b.max, b.failures)
+}
+
+// isRefused: the subscription service answered that this caller may not
+// subscribe. A missing or unaccepted token is HTTP 401 (UNAUTHENTICATED); a
+// token without the scope's role, or an unpublished scope, is HTTP 403 or the
+// status itself (PERMISSION_DENIED).
+func isRefused(err error) bool {
+	switch status.Code(err) {
+	case codes.Unauthenticated, codes.PermissionDenied:
+		return true
+	}
+	return false
+}
+
+func refusalMessage(sub *Subscription, err error, every time.Duration) string {
+	scope := sub.Request.Domain + "." + sub.Request.Model + "." + sub.Request.Scope
+	why := "the application's registration lacks the role of scope " + scope + " for live updates"
+	if status.Code(err) == codes.Unauthenticated {
+		why = "its token was not accepted; check the application's registration and that it has the role of scope " + scope + " for live updates"
+	}
+	return fmt.Sprintf(
+		"subscription %s was refused by the subscription service (%v): %s. Trying again with growing waits, at most every %s; the retries are logged at debug level.",
+		sub.ID, err, why, every)
 }
 
 func prepareRequestForReconnect(sub *Subscription) {
@@ -165,6 +257,9 @@ func withDefaults(in RunOptions) RunOptions {
 	if in.ReconnectMax == 0 {
 		in.ReconnectMax = 60 * time.Second
 	}
+	if in.ReconnectMaxRefused == 0 {
+		in.ReconnectMaxRefused = 5 * time.Minute
+	}
 	if in.Logger == nil {
 		in.Logger = silentLogger{}
 	}
@@ -172,27 +267,30 @@ func withDefaults(in RunOptions) RunOptions {
 }
 
 // readUntilDone opens the stream and reads events until the server ends it
-// or an error occurs. ctx cancellation aborts the stream cleanly.
-func readUntilDone(ctx context.Context, sub *Subscription, client streamClient, o RunOptions) error {
+// or an error occurs. ctx cancellation aborts the stream cleanly. received
+// says whether the stream delivered a message; the keepalive counts, since the
+// service sends one only on a stream it has accepted.
+func readUntilDone(ctx context.Context, sub *Subscription, client streamClient, o RunOptions) (received bool, _ error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	stream, err := client.Subscribe(streamCtx, toProtoRequest(sub.Request))
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	for {
 		raw, err := stream.Recv()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil
+				return received, nil
 			}
-			return err
+			return received, err
 		}
 		if ctx.Err() != nil {
-			return nil
+			return received, nil
 		}
+		received = true
 		if raw.GetMessagetype() == pb.MessageType_KEEPALIVE {
 			continue
 		}
