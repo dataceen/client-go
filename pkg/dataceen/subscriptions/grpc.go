@@ -10,6 +10,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/dataceen/client-go/pkg/dataceen/internal/personctx"
+
 	pb "github.com/dataceen/client-go/pkg/dataceenevent"
 )
 
@@ -72,6 +74,11 @@ func dialSubscription(subscriptionURL, token string) (*grpc.ClientConn, streamCl
 
 func (r *realStreamClient) Subscribe(ctx context.Context, req *pb.SubscriptionRequest) (eventStream, error) {
 	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+r.token)
+	// The signed-in person the subscription is run for (dataceen.WithPerson), asked
+	// again each time the stream is opened.
+	if person := personctx.From(ctx); person != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "dataceen-person", person)
+	}
 	stream, err := r.client.Subscribe(ctx, req)
 	if err != nil {
 		return nil, err

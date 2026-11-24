@@ -305,3 +305,46 @@ func TestPostGraphQL_TokenAcquireError(t *testing.T) {
 		t.Fatalf("calls = %d, want 0", got)
 	}
 }
+
+func TestPostGraphQL_CarriesThePersonOfItsContextAndNoOther(t *testing.T) {
+	ok := func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "OK") }
+	h := &scriptedHandler{t: t, steps: []func(http.ResponseWriter, *http.Request){ok, ok, ok, ok}}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	tr := newTransport(t, srv, &fakeTokenProvider{}, 0)
+
+	plain := context.Background()
+	for _, ctx := range []context.Context{plain, WithPerson(plain, "token-of-ada"), WithPerson(plain, "  "), plain} {
+		if _, err := tr.postGraphQL(ctx, sampleReq, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	want := []string{"", "token-of-ada", "", ""}
+	for i, header := range h.headers {
+		if got := header.Get(PersonHeader); got != want[i] {
+			t.Fatalf("call %d: %s = %q, want %q", i+1, PersonHeader, got, want[i])
+		}
+	}
+	if got := PersonFrom(WithPerson(plain, "token-of-bo")); got != "token-of-bo" {
+		t.Fatalf("PersonFrom = %q", got)
+	}
+	if got := PersonFrom(plain); got != "" {
+		t.Fatalf("PersonFrom of a plain context = %q", got)
+	}
+
+	// Given as a function it is asked each time: what a subscription's reconnect reads.
+	token := "first"
+	sourced := WithPersonSource(plain, func() string { return token })
+	if got := PersonFrom(sourced); got != "first" {
+		t.Fatalf("PersonFrom of a source = %q", got)
+	}
+	token = "second"
+	if got := PersonFrom(sourced); got != "second" {
+		t.Fatalf("PersonFrom of a source, asked again = %q", got)
+	}
+	token = "  "
+	if got := PersonFrom(sourced); got != "" {
+		t.Fatalf("PersonFrom of a blank source = %q", got)
+	}
+}

@@ -147,6 +147,7 @@ func (t *httpTransport) do(ctx context.Context, body []byte, token string) (*htt
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
+		setPerson(ctx, req)
 		resp, err := t.httpClient.Do(req)
 		if err != nil {
 			cancel()
@@ -162,6 +163,7 @@ func (t *httpTransport) do(ctx context.Context, body []byte, token string) (*htt
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	setPerson(ctx, req)
 	return t.httpClient.Do(req)
 }
 
@@ -197,5 +199,13 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 		return ctx.Err()
 	case <-t.C:
 		return nil
+	}
+}
+
+// setPerson adds the signed-in person this call is made for, where the
+// caller's context carries one (WithPerson).
+func setPerson(ctx context.Context, req *http.Request) {
+	if person := PersonFrom(ctx); person != "" {
+		req.Header.Set(PersonHeader, person)
 	}
 }
